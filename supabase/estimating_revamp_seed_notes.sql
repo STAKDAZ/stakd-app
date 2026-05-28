@@ -1,0 +1,4 @@
+-- Dura Steel estimating revamp notes
+-- You already ran the schema/material/rate/labor seed SQL in Supabase during setup.
+-- Keep this file as a marker for the V18 estimating-engine patch.
+-- Next implementation step is wiring calculateItem() into app/admin/estimating/page.tsx.

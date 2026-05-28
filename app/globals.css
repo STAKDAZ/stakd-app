@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #172033;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+select,
+input[type="checkbox"] {
+  touch-action: manipulation;
+}
+
+::selection {
+  background: #bae6fd;
+  color: #0f172a;
+}
