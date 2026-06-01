@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
 function getHashParams() {
@@ -19,8 +18,6 @@ function getQueryParam(name: string) {
 }
 
 export default function ResetPasswordClient() {
-  const router = useRouter();
-
   const [status, setStatus] = useState<
     "exchanging" | "ready" | "saving" | "saved" | "error"
   >("exchanging");
@@ -121,10 +118,11 @@ export default function ResetPasswordClient() {
     }
 
     setStatus("saved");
-    setMessage("Password updated. Redirecting to login...");
+    setMessage("");
+    setPassword("");
+    setPassword2("");
 
     await supabase.auth.signOut();
-    router.replace("/login");
   }
 
   return (
@@ -149,11 +147,11 @@ export default function ResetPasswordClient() {
 
         {status === "exchanging" ? (
           <div className="mt-6 text-sm text-zinc-600">
-            Validating reset link…
+            Validating reset link...
           </div>
         ) : null}
 
-        {(status === "ready" || status === "saving" || status === "saved") && (
+        {(status === "ready" || status === "saving") && (
           <form onSubmit={onSave} className="mt-6 space-y-3">
             <div>
               <label className="block text-sm font-medium text-zinc-800">
@@ -188,14 +186,31 @@ export default function ResetPasswordClient() {
               disabled={status === "saving"}
               className="w-full rounded-lg bg-black px-4 py-2 text-white disabled:opacity-60"
             >
-              {status === "saving" ? "Saving…" : "Update password"}
+              {status === "saving" ? "Saving..." : "Update password"}
             </button>
           </form>
         )}
 
+        {status === "saved" && (
+          <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="text-base font-semibold text-emerald-900">
+              Password updated successfully
+            </div>
+            <p className="mt-1 text-sm text-emerald-800">
+              Thank you. Your new password is ready to use.
+            </p>
+            <a
+              className="mt-4 block rounded-lg bg-emerald-900 px-4 py-2 text-center text-sm font-medium text-white transition hover:bg-emerald-800"
+              href="/admin/login"
+            >
+              Continue to STAKD login
+            </a>
+          </div>
+        )}
+
         {status === "error" && (
           <div className="mt-6">
-            <a className="text-sm underline" href="/login">
+            <a className="text-sm underline" href="/admin/login">
               Back to login
             </a>
           </div>
