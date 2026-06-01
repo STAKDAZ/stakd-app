@@ -11,7 +11,7 @@ type FlashMsg = { type: "error" | "success"; text: string };
 export default function AdminLoginClient({ next }: { next: string }) {
   const router = useRouter();
 
-  const [email, setEmail] = useState("joe@stakdaz.com");
+  const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [msg, setMsg] = useState<FlashMsg | null>(null);
   const [loading, setLoading] = useState(false);
@@ -122,7 +122,7 @@ export default function AdminLoginClient({ next }: { next: string }) {
               className="w-full rounded-md border px-3 py-2"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="joe@stakdaz.com"
+              placeholder="name@stakdaz.com"
               autoComplete="email"
             />
           </div>

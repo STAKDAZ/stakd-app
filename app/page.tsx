@@ -81,7 +81,7 @@ export default function Home() {
                 </a>
 
                 <div className="mt-4 rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-center text-sm text-neutral-600">
-                  Authorized user: <span className="font-semibold text-neutral-950">joe@stakdaz.com</span>
+                  Authorized STAKD team members only
                 </div>
               </div>
             </div>
