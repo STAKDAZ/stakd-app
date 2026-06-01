@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { PrecastYardMark } from "@/components/precast-yard-mark";
 
 type NavItem = {
   href: string;
@@ -24,12 +25,12 @@ function NavLink({ href, label, description, active }: NavItem & { active: boole
       href={href}
       className={`block rounded-xl px-4 py-3 transition ${
         active
-          ? "bg-sky-700 text-white shadow-sm"
-          : "text-slate-700 hover:bg-sky-50 hover:text-sky-800"
+          ? "bg-cyan-800 text-white shadow-sm"
+          : "text-slate-700 hover:bg-cyan-50 hover:text-cyan-900"
       }`}
     >
       <div className="text-sm font-semibold leading-5">{label}</div>
-      <div className={`mt-0.5 text-xs leading-5 ${active ? "text-sky-100" : "text-slate-500"}`}>
+      <div className={`mt-0.5 text-xs leading-5 ${active ? "text-cyan-50" : "text-slate-500"}`}>
         {description}
       </div>
     </Link>
@@ -93,12 +94,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const settingsActive = pathname.startsWith("/admin/settings");
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-50 text-slate-900">
-      <aside className="sticky top-0 h-screen w-[260px] shrink-0 border-r border-slate-200 bg-white">
+    <div className="flex min-h-screen w-full bg-[#f5f7f8] text-slate-900">
+      <aside className="sticky top-0 h-screen w-[260px] shrink-0 border-r border-slate-200 bg-white/95">
         <div className="flex h-full flex-col p-4">
-          <Link href="/admin/dashboard" className="mb-4 block rounded-2xl bg-sky-50 p-4">
-            <div className="text-xs font-bold uppercase tracking-[0.22em] text-sky-800">STAKD</div>
-            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-950">DS App</div>
+          <Link href="/admin/dashboard" className="mb-4 block rounded-2xl border border-cyan-100 bg-cyan-50 p-4">
+            <div className="text-xs font-bold uppercase tracking-[0.22em] text-cyan-900">STAKD</div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Ops App</div>
             <div className="mt-1 text-sm text-slate-600">Operations workspace</div>
           </Link>
 
@@ -118,9 +119,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
 
           <div className="mt-auto pt-4">
+            <div className="mb-4 border-t border-slate-200 pt-4">
+              <PrecastYardMark />
+            </div>
             <Link
               href="/admin/logout"
-              className="block rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="block rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-cyan-200 hover:bg-cyan-50"
             >
               Logout
             </Link>

@@ -136,7 +136,9 @@ export default function AdminDashboard() {
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [addingJob, setAddingJob] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Record<string, string>>({});
   const draftKey = (jobId: string, field: string) => `${jobId}:${field}`;
@@ -278,7 +280,7 @@ export default function AdminDashboard() {
 
   /* ================= EMAIL HELPER ================= */
 
-  async function notifyAccounting(type: "won" | "completed", jobId: string) {
+  async function notifyAccounting(type: "created" | "won" | "completed", jobRef: { jobId?: string; jobNumber?: string }) {
     const { data: sess } = await supabase.auth.getSession();
     const token = sess.session?.access_token;
     if (!token) {
@@ -292,24 +294,127 @@ export default function AdminDashboard() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ type, job_id: jobId }),
+      body: JSON.stringify({ type, job_id: jobRef.jobId, job_number: jobRef.jobNumber }),
     });
 
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const message = json?.error || `Accounting notification failed (${res.status}).`;
       console.error("Accounting notification failed:", message, json);
-      setError(message);
+      setNotice(`Job saved, but email was not sent: ${message}`);
       return;
     }
 
     await loadJobs(clientId, includeArchived);
   }
 
+  async function runDriveAction(body: Record<string, unknown>) {
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+
+    if (!token) {
+      setNotice("Google Drive action skipped because your session needs to be refreshed.");
+      return null;
+    }
+
+    const res = await fetch("/api/admin/job-drive", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok || json?.ok === false) {
+      const message =
+        json?.code === "drive_not_configured"
+          ? "Job saved. Google Drive folders are not connected yet."
+          : json?.error || "Google Drive action could not be completed.";
+      setNotice(message);
+      return null;
+    }
+
+    return json;
+  }
+
+  async function moveDriveForJob(job: JobRow, target: "current" | "lost" | "completed" | "archived") {
+    if (!job.job_folder_url) return;
+
+    const result = await runDriveAction({
+      action: "move",
+      folderUrl: job.job_folder_url,
+      target,
+    });
+
+    if (result?.folderUrl && result.folderUrl !== job.job_folder_url) {
+      await supabase.rpc("admin_job_patch", {
+        p_id: job.id,
+        p_patch: { job_folder_url: result.folderUrl },
+      });
+    }
+  }
+
+  async function deleteJob(job: JobRow) {
+    const label = `${job.job_number} ${job.job_name ?? ""}`.trim();
+    const ok =
+      typeof window === "undefined"
+        ? false
+        : window.confirm(
+            `Delete ${label} permanently?\n\nThis removes the job from STAKD. If it has a Drive folder link, the app will also try to move that folder to Google Drive trash.`
+          );
+
+    if (!ok) return;
+
+    setError(null);
+    setNotice(null);
+    setDeletingJobId(job.id);
+
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+
+      if (!token) {
+        setError("Your session expired. Please log out and sign back in, then try deleting again.");
+        return;
+      }
+
+      const res = await fetch("/api/admin/jobs/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id: job.id }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        setError(json?.error || `Could not delete ${label}.`);
+        await loadJobs(clientId, includeArchived);
+        return;
+      }
+
+      setJobs((prev) => prev.filter((row) => row.id !== job.id));
+      await loadMetrics(clientId);
+      if (json?.warning) {
+        setNotice(json.warning);
+      } else {
+        setNotice(`${label} was deleted.`);
+      }
+    } finally {
+      setDeletingJobId(null);
+    }
+  }
+
   /* ================= UPDATE ================= */
 
   async function patchJob(id: string, patch: Partial<JobRow>) {
     setError(null);
+    setNotice(null);
 
     const prevJob = jobs.find((j) => j.id === id);
     const nextJob: JobRow | undefined = prevJob
@@ -346,17 +451,34 @@ export default function AdminDashboard() {
       const newStatus = (nextJob.status ?? "").toLowerCase();
 
       if (prevStatus !== "won" && newStatus === "won") {
-        await notifyAccounting("won", id);
+        await moveDriveForJob(nextJob, "current");
+        await notifyAccounting("won", { jobId: id });
+      }
+
+      if (prevStatus !== "lost" && newStatus === "lost") {
+        await moveDriveForJob(nextJob, "lost");
+        await supabase.rpc("admin_job_patch", {
+          p_id: id,
+          p_patch: { is_archived: true },
+        });
+        setJobs((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, is_archived: true } : r))
+        );
+        if (!includeArchived) {
+          setJobs((prev) => prev.filter((r) => r.id !== id));
+        }
       }
 
       const prevPc = Number(prevJob.percent_complete ?? 0);
       const newPc = Number(nextJob.percent_complete ?? 0);
 
       if (prevPc < 100 && newPc >= 100) {
-        await notifyAccounting("completed", id);
+        await moveDriveForJob(nextJob, "completed");
+        await notifyAccounting("completed", { jobId: id });
       }
 
       if (!prevJob.is_archived && !!nextJob.billed) {
+        await moveDriveForJob(nextJob, "completed");
         await supabase.rpc("admin_job_patch", {
           p_id: id,
           p_patch: { is_archived: true },
@@ -415,6 +537,7 @@ export default function AdminDashboard() {
     try {
       setAddingJob(true);
       setError(null);
+      setNotice(null);
 
       const prefix = yearPrefix(currentYear);
 
@@ -465,32 +588,21 @@ export default function AdminDashboard() {
         return;
       }
 
-      try {
-        const driveRes = await fetch("/api/admin/provision-job-drive", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+      await notifyAccounting("created", { jobNumber: nextJobNumber });
+
+      const driveJson = await runDriveAction({
+        action: "provision",
+        jobNumber: nextJobNumber,
+        jobName: form.job_name || "NEW JOB",
+      });
+
+      if (driveJson?.rootFolderUrl) {
+        await supabase.rpc("admin_job_patch_by_job_number", {
+          p_job_number: nextJobNumber,
+          p_patch: {
+            job_folder_url: driveJson.rootFolderUrl,
           },
-          body: JSON.stringify({
-            jobNumber: nextJobNumber,
-            jobName: form.job_name || "NEW JOB",
-          }),
         });
-
-        const driveJson = await driveRes.json();
-
-        if (!driveRes.ok) {
-          console.error("Drive provisioning failed:", driveJson);
-        } else if (driveJson?.rootFolderUrl) {
-          await supabase.rpc("admin_job_patch_by_job_number", {
-            p_job_number: nextJobNumber,
-            p_patch: {
-              job_folder_url: driveJson.rootFolderUrl,
-            },
-          });
-        }
-      } catch (driveErr) {
-        console.error("Drive provisioning error:", driveErr);
       }
 
       setShowAdd(false);
@@ -582,8 +694,14 @@ export default function AdminDashboard() {
         </div>
 
         {error && (
-          <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
             {error}
+          </div>
+        )}
+
+        {notice && (
+          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm font-medium text-sky-800">
+            {notice}
           </div>
         )}
 
@@ -633,6 +751,7 @@ export default function AdminDashboard() {
                     <Th className="text-center">QB</Th>
                     <Th className="text-center">Billed</Th>
                     <Th className="text-center">Archive</Th>
+                    <Th className="text-center">Delete</Th>
                   </tr>
                 </thead>
 
@@ -1011,6 +1130,17 @@ export default function AdminDashboard() {
                           disabled={j.is_archived}
                         >
                           {j.is_archived ? "Archived" : "Archive"}
+                        </button>
+                      </Td>
+
+                      <Td className="text-center">
+                        <button
+                          className="rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => deleteJob(j)}
+                          disabled={deletingJobId === j.id}
+                          title="Permanently delete this job"
+                        >
+                          {deletingJobId === j.id ? "Deleting..." : "Delete"}
                         </button>
                       </Td>
                     </tr>

@@ -1,10 +1,16 @@
 
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+import { getAuthenticatedUser } from "@/lib/supabase/server-auth";
 
 export async function POST(req: Request) {
   try {
-    const { fromEmail, job, message } = await req.json();
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return NextResponse.json({ error: "Missing or invalid auth token." }, { status: 401 });
+    }
+
+    const { job, message } = await req.json();
 
     if (!message || String(message).trim().length < 3) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
@@ -29,7 +35,7 @@ export async function POST(req: Request) {
     const text = [
       `A client submitted a concern from the portal.`,
       ``,
-      `From: ${fromEmail ?? "unknown"}`,
+      `From: ${user.email}`,
       `Job #: ${jobNumber}`,
       `Job Name: ${jobName}`,
       `PO #: ${poNumber}`,
@@ -51,7 +57,7 @@ export async function POST(req: Request) {
       to: ["joe@stakdaz.com", "pm@stakdaz.com"],
       subject,
       text,
-      replyTo: fromEmail || undefined,
+      replyTo: user.email,
     });
 
     return NextResponse.json({ ok: true });

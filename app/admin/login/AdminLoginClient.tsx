@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 
 type FlashMsg = { type: "error" | "success"; text: string };
@@ -47,11 +48,11 @@ export default function AdminLoginClient({ next }: { next: string }) {
     }
 
     const signedEmail = data.session?.user.email?.toLowerCase() ?? "";
-    if (signedEmail !== "joe@stakdaz.com") {
+    if (!signedEmail.endsWith("@stakdaz.com")) {
       await supabase.auth.signOut();
       setMsg({
         type: "error",
-        text: "Only joe@stakdaz.com is allowed into this STAKD app.",
+        text: "Only authorized @stakdaz.com users can access this STAKD app.",
       });
       return;
     }
@@ -155,12 +156,12 @@ export default function AdminLoginClient({ next }: { next: string }) {
             Forgot password
           </button>
 
-          <a
+          <Link
             href="/"
             className="block text-center text-xs text-zinc-500 hover:underline"
           >
             Back to home
-          </a>
+          </Link>
         </form>
       </div>
     </div>

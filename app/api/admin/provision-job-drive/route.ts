@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { provisionJobDriveFolder } from "@/lib/google-drive";
+import { requireInternalUser } from "@/lib/supabase/server-auth";
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireInternalUser(req);
+    if (auth.response) return auth.response;
+
     const body = await req.json();
     const jobNumber = String(body.jobNumber ?? "").trim();
     const jobName = String(body.jobName ?? "").trim();

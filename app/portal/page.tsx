@@ -224,11 +224,17 @@ export default function PortalPage() {
       setSendingConcern(true);
       setConcernMsg(null);
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Your session expired. Please sign in again.");
+
       const res = await fetch("/api/concern", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          fromEmail: sessionEmail,
           job: {
             id: concernJob.id,
             job_number: concernJob.job_number,

@@ -1,13 +1,14 @@
 import AdminLoginClient from "./AdminLoginClient";
 
-export default function AdminLoginPage({
+export default async function AdminLoginPage({
   searchParams,
 }: {
-  searchParams?: { next?: string };
+  searchParams?: Promise<{ next?: string }>;
 }) {
+  const params = await searchParams;
   const next =
-    typeof searchParams?.next === "string" && searchParams.next.length
-      ? searchParams.next
+    typeof params?.next === "string" && params.next.length
+      ? params.next
       : "/admin/dashboard";
 
   return <AdminLoginClient next={next} />;

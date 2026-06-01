@@ -1,18 +1,38 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
+import { requireInternalUser } from "@/lib/supabase/server-auth";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-type NotifyType = "won" | "completed";
+type NotifyType = "created" | "won" | "completed";
+
+const eventKeyByType: Record<NotifyType, string> = {
+  created: "job_created",
+  won: "job_won",
+  completed: "job_completed",
+};
+
+const defaultRecipientsByType: Record<NotifyType, string[]> = {
+  created: ["joe@stakdaz.com", "pm@stakdaz.com"],
+  won: ["accounting@stakdaz.com", "joe@stakdaz.com", "pm@stakdaz.com"],
+  completed: ["accounting@stakdaz.com", "joe@stakdaz.com", "pm@stakdaz.com"],
+};
+
+function cleanRecipients(value: unknown, fallback: string[]) {
+  const rows = Array.isArray(value) ? value : [];
+  const cleaned = rows
+    .map((email) => String(email || "").trim().toLowerCase())
+    .filter((email) => email.endsWith("@stakdaz.com"));
+  return cleaned.length ? Array.from(new Set(cleaned)) : fallback;
+}
 
 export async function POST(req: Request) {
   try {
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!supabaseUrl) {
       return NextResponse.json(
-        { error: "Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY." },
+        { error: "Missing NEXT_PUBLIC_SUPABASE_URL." },
         { status: 500 }
       );
     }
@@ -20,32 +40,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY." }, { status: 500 });
     }
 
-    const auth = req.headers.get("authorization") || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Missing auth token." }, { status: 401 });
+    const auth = await requireInternalUser(req);
+    if (auth.response) return auth.response;
+    const email = auth.user.email;
 
-    // 1) Validate session token (RLS-safe, uses anon key + Authorization header)
-    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
-    const { data: userRes, error: userErr } = await authClient.auth.getUser();
-    if (userErr || !userRes?.user?.email) {
-      return NextResponse.json({ error: "Invalid session." }, { status: 401 });
-    }
-
-    const email = userRes.user.email.toLowerCase();
-    if (!email.endsWith("@stakdaz.com")) {
-      return NextResponse.json({ error: "Not authorized." }, { status: 403 });
-    }
-
-    // 2) Parse payload
     const body = await req.json();
     const type: NotifyType | undefined = body?.type;
     const jobId: string | undefined = body?.job_id;
+    const jobNumberInput: string | undefined = body?.job_number;
 
-    if (!type || !jobId) {
-      return NextResponse.json({ error: "Missing payload. Expected { type, job_id }." }, { status: 400 });
+    if (!type || !["created", "won", "completed"].includes(type) || (!jobId && !jobNumberInput)) {
+      return NextResponse.json({ error: "Missing payload. Expected { type, job_id or job_number }." }, { status: 400 });
     }
 
     const resendKey = process.env.RESEND_API_KEY;
@@ -71,13 +76,14 @@ export async function POST(req: Request) {
         rfq_url,
         job_folder_url,
         outsourced_amount,
+        created_notified_at,
         won_notified_at,
         bill_ready_notified_at,
         client:clients(name),
         outsourced:subcontractors(name)
       `
       )
-      .eq("id", jobId)
+      .match(jobId ? { id: jobId } : { job_number: jobNumberInput })
       .single();
 
     if (jobErr || !job) {
@@ -85,6 +91,9 @@ export async function POST(req: Request) {
     }
 
     // 4) Dedup: don’t email twice
+    if (type === "created" && job.created_notified_at) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "Already notified (created_notified_at set)." });
+    }
     if (type === "won" && job.won_notified_at) {
       return NextResponse.json({ ok: true, skipped: true, reason: "Already notified (won_notified_at set)." });
     }
@@ -95,11 +104,12 @@ export async function POST(req: Request) {
     const resend = new Resend(resendKey);
 
     const from = process.env.CONCERNS_FROM_EMAIL || "STAKD Portal <no-reply@stakdaz.com>";
-    const to = [
-  "accounting@stakdaz.com",
-  "joe@stakdaz.com",
-  "pm@stakdaz.com",
-];
+    const { data: setting } = await adminClient
+      .from("notification_settings")
+      .select("recipients")
+      .eq("event_key", eventKeyByType[type])
+      .maybeSingle();
+    const to = cleanRecipients(setting?.recipients, defaultRecipientsByType[type]);
 
     const jobNumber = job.job_number ?? "—";
     const jobName = job.job_name ?? "—";
@@ -114,7 +124,10 @@ export async function POST(req: Request) {
     let subject = "";
     let header = "";
 
-    if (type === "won") {
+    if (type === "created") {
+      subject = `New Job Created: ${jobNumber} - ${jobName}`;
+      header = `A new job has been created in STAKD.`;
+    } else if (type === "won") {
       subject = `New Job Won: ${jobNumber} — ${jobName}`;
       header = `We won a new job and it’s ready for accounting setup.`;
     } else {
@@ -154,11 +167,13 @@ export async function POST(req: Request) {
 
     // 5) Stamp the job so we don’t email again
     const stamp =
-      type === "won"
+      type === "created"
+        ? { created_notified_at: new Date().toISOString() }
+        : type === "won"
         ? { won_notified_at: new Date().toISOString() }
         : { bill_ready_notified_at: new Date().toISOString() };
 
-    const { error: stampErr } = await adminClient.from("jobs").update(stamp).eq("id", jobId);
+    const { error: stampErr } = await adminClient.from("jobs").update(stamp).eq("id", job.id);
     if (stampErr) {
       // Email already sent; returning ok but include stamp warning
       return NextResponse.json({ ok: true, warning: `Email sent but failed to stamp job: ${stampErr.message}` });

@@ -161,7 +161,7 @@ export default function ClientsSettingsPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
               className="w-full rounded border px-3 py-2 text-sm"
-              placeholder="Client name (e.g., Roxteel)"
+              placeholder="Client name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {

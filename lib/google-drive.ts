@@ -139,6 +139,15 @@ type ProvisionResult = {
   subfolders: Record<string, { id: string; url: string }>;
 };
 
+export type DriveMoveTarget = "quoting" | "current" | "archived" | "lost" | "completed";
+
+type MoveResult = {
+  folderId: string;
+  folderUrl: string;
+  destination: DriveMoveTarget;
+  destinationParentId: string;
+};
+
 async function copyTemplateTree(
   templateFolderId: string,
   destinationFolderId: string,
@@ -219,4 +228,91 @@ export async function provisionJobDriveFolder(
     rootFolderUrl: root.webViewLink,
     subfolders,
   };
+}
+
+function folderIdFromUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch?.[1]) return folderMatch[1];
+
+  const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch?.[1]) return idMatch[1];
+
+  return /^[a-zA-Z0-9_-]{20,}$/.test(trimmed) ? trimmed : "";
+}
+
+function parentIdForTarget(target: DriveMoveTarget): string {
+  if (target === "quoting") return process.env.GOOGLE_DRIVE_QUOTING_PARENT_ID || "";
+  if (target === "current") return process.env.GOOGLE_DRIVE_CURRENT_PARENT_ID || "";
+  if (target === "lost") {
+    return (
+      process.env.GOOGLE_DRIVE_ARCHIVED_LOST_PARENT_ID ||
+      process.env.GOOGLE_DRIVE_ARCHIVED_PARENT_ID ||
+      ""
+    );
+  }
+  if (target === "completed") {
+    return (
+      process.env.GOOGLE_DRIVE_ARCHIVED_COMPLETED_PARENT_ID ||
+      process.env.GOOGLE_DRIVE_ARCHIVED_PARENT_ID ||
+      ""
+    );
+  }
+  return process.env.GOOGLE_DRIVE_ARCHIVED_PARENT_ID || "";
+}
+
+export async function moveJobDriveFolder(
+  folderUrlOrId: string,
+  target: DriveMoveTarget
+): Promise<MoveResult> {
+  const folderId = folderIdFromUrl(folderUrlOrId);
+  if (!folderId) throw new Error("Job folder link is missing or invalid.");
+
+  const destinationParentId = parentIdForTarget(target);
+  if (!destinationParentId) {
+    throw new Error(`Missing Google Drive destination folder for ${target}.`);
+  }
+
+  const drive = getDriveClient();
+  const current = await drive.files.get({
+    fileId: folderId,
+    fields: "id, parents, webViewLink",
+    supportsAllDrives: true,
+  });
+
+  const previousParents = (current.data.parents || []).join(",");
+
+  const updated = await drive.files.update({
+    fileId: folderId,
+    addParents: destinationParentId,
+    removeParents: previousParents || undefined,
+    supportsAllDrives: true,
+    fields: "id, webViewLink",
+  });
+
+  return {
+    folderId,
+    folderUrl: updated.data.webViewLink || current.data.webViewLink || "",
+    destination: target,
+    destinationParentId,
+  };
+}
+
+export async function trashJobDriveFolder(folderUrlOrId: string): Promise<{ folderId: string }> {
+  const folderId = folderIdFromUrl(folderUrlOrId);
+  if (!folderId) throw new Error("Job folder link is missing or invalid.");
+
+  const drive = getDriveClient();
+  await drive.files.update({
+    fileId: folderId,
+    supportsAllDrives: true,
+    requestBody: {
+      trashed: true,
+    },
+    fields: "id",
+  });
+
+  return { folderId };
 }
